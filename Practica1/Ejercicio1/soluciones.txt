@@ -1,0 +1,47 @@
+Practica 1
+
+Ejercicio 1 Compilacion
+
+a) Compila el código del ejercicio y ejecútalo
+
+Para compilar el código en dos pasos haremos:
+gcc -c hello2.c //para obtener el archivo .o
+gcc hello2.0 -o hello2.exe //para obtener el .exe
+./hello2.exe //para ejecutar el código
+
+b) Obtén la salida de la etapa de pre-procesado (opción -E o la opción --save-temps para obtener la salida de todas las etapas intermedias) y en un fichero hello2.i
+
+gcc --save-temps hello2.c //para obtener las etapas intermedias y tb generar el hello2.i
+
+c) ¿Qué ha ocurrido con la “llamada a min()” en hello2.i?
+
+Una vez tenemos el archivo hello2.i, lo leemos desde la terminal a traves del comando cut hello2.i
+Veremos que la llamada a la función min() que teníamos en hello2.c se ha sustituido por (a < b) ? a : b.
+Esto se debe a que en nuestro código .c teníamos una definición de macro (#define min(a, b) ((a) < (b) ? (a) : (b))).
+Al usar la opción --save-temps el procesador realiza operaciones como sustituir los macros definidos por sus contenidos (por eso tb se ha cambiado el valor de N por 5), incluir los contenidos de los #include y eliminar los comentarios.
+
+d) ¿Qué efecto ha tenido la directiva #include <stdio.h>?
+
+Proporcionar la declaración de funciones como printf(), sin esta directiva hubiésemos obtenido un mensaje de error ya que el compilador no sabría que es printf().
+
+
+Ejercicio 2 Herramienta make
+
+a) Examina el makefile, identifica las variables definidas, los objetivos (targets) y las regalas.
+
+
+
+
+
+
+
+
+• Ejecuta make en la linea de comandos y comprueba las ordenes que ejecuta para construir el proyecto.
+• Marca el fichero aux.c como modificado ejecutando touch aux.c. Después ejecuta de nuevo make. ¿Qué diferencia
+hay con la primera vez que lo ejecutaste? ¿Por qué?
+• Ejecuta la orden make clean. ¿Qué ha sucedido? Observa que el objetivo clean está marcado como phony en la
+directiva .PHONY: clean. ¿por qué? Para comprobarlo puedes comentar dicha línea del makefile, compilar de
+nuevo haciendo make, y después crear un fichero en el mismo directorio que se llame clean, usando el comando
+touch clean. Ejecuta ahora make clean, ¿qué pasa?
+• Comenta la línea LIBS = -lm poniendo delante una almoadilla (#). Vuelve a contruir el proy
+
