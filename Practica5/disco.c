@@ -1,118 +1,156 @@
-#include <stdio.h>
+
+
 #include <stdlib.h>
 #include <unistd.h>
-#include <pthread.h>
+#include <stdio.h>
+#include <pthread.h> //librearias para los hilos
+
+/*
+El objetivo de este programa es implementar una discoteca con clientes (hilos) 
+que entran, bailan y salen, respetando las reglas de concurrencia.
+
+Tenemos dos tipos de clientes (vips y normales).
+
+
+REGLAS
+
+Si el aforo esta completo los nuevos clientes deberan esperar a que salga algun cliente
+para poder entrar
+
+Si hay clientes vips esperando y normales, se les dara prioridad a los vips
+
+Los clientes iran entrando segun su orden de llegada y su grupo (vip o normal).
+
+
+En la creacion de cada hilo se le paran dos argumentos:
+id: que corresponde con el orden creacion del hilo
+isvip: valor que indique si es vip o no
+*/
 
 #define CAPACITY 5
 #define VIPSTR(vip) ((vip) ? "  vip  " : "not vip")
 
-pthread_mutex_t mutex;
-pthread_cond_t cond_vip;
-pthread_cond_t cond_normal;
-int num_clients_inside;
-int num_vips_cola, num_normales_cola;
+typedef struct {
+	int id; //para representar el id de la creacion del hilo
+	int isvip; //0 para clientes normales y 1 para clientes vips
+}tCliente; //estructura para representar el hilo (cliente)
 
-struct arguentos_cliente {
-	int id;
-	int isVip;
-};
+
+int ocupacion = 0; //debemos llevar un registro de los clientes dentro de la discoteca, se incrementara cuando entren y decrementara cuando salga
+int esperando_vip = 0; //numero de personas vips esperando, se incremente justo antes de que el vip este con el wait
+int esperando_normal = 0; //numero de personas noramles esperando, se incrementa justo antes de que el normal este con el wait
+
+/*
+sirve para proteger las variables compartidas para que dos hilos no modifiquen la misma variable (ocupacion, esperando...)
+antes de leerla hacemos un lock (para que nadie pueda entrar) y despues un unlock (para que otro pueda entrar)
+*/
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; 
+
+/*
+es una variable de condicion y sirve para que un hilo espere de forma segura a que se cumpla una condicion (que haya hueco)
+se usa con pthread_cond_wait (&cond, &mutex) donde libera el mutex mientras espera (para que los demas puedan hacer cosas)
+y lo bloquea cuando despierta (para que el siga operando)
+cuando un cliente sale, hacemos pthread_cond_broadcast(&cond) para despertar a todos los que estaban esperando, y así puedan comprobar si ahora pueden entrar.
+*/
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER; 
 
 void enter_normal_client(int id)
 {
-	pthread_mutex_lock(&mutex);
-	//mientras la discoteca este llena, espero 
-	while (num_clients_inside >= CAPACITY) { //falta la condicicio de que no sea vip y que hayan 0 vips
+	//a priori deberia ser igual que el vip pero en la condicion añadiendo que no pueden haber vips esperando
+	pthread_mutex_lock(&mutex); //bloqueamos el mutex ya que vamos a hacer modificaciones
 
+	while (ocupacion >= CAPACITY || esperando_vip > 0) { //en este caso tenemos las condiciones de que haya hueco y de que no hayan vips esperando
+		pthread_cond_wait (&cond, &mutex);//dormimos al  hilo hasta que se cumplan las dos condiciones
 	}
-	num_clients_inside++;
-	num_normales_cola--;
-	pthread_mutex_unlock (&mutex);
+	ocupacion++; //un cliente mas en la discoteca
+	pthread_mutex_unlock(&mutex); //desbloqueamos el mutex para que puedan usarlo los demas hilos
 }
 
 void enter_vip_client(int id)
 {
-	pthread_mutex_lock(&mutex); //bloqueamos el mutex
-	//mientras la discoteca este llena, espero 
-	while (num_clients_inside >= CAPACITY) {//falta alguna condicion
-		//hacemos un wait
+	/*
+	primero debemos pensar en el lock y en el unlock del mutex, luego tenemos que ver si la capacidad es mayor que la ocupacion, si no lo es, 
+	debemos esperar a que lo sea
+	*/
+
+	pthread_mutex_lock(&mutex); //bloqueamos el mutex debido a que vamos a modificar variables
+	
+	esperando_vip++; //ponemos el cliente vip a la cola
+
+	while (ocupacion >= CAPACITY) { //si la ocupacion es mayor o igaul a la capacidad es decir no hay mas aforo debemos esperar
+		pthread_cond_wait(&cond, &mutex); //esperamos dejando el hilo dormir
 	}
-	num_clients_inside++; //aumentamos el numero de clientes dentro
-	num_vips_cola--; //decrementamos el numero de vips en la cola
-	pthread_mutex_unlock (&mutex); //desbloqueamos el mutex
+	ocupacion++; //un cliente mas en la discoteca
+	esperando_vip--; //decrementamos el numero de vips esperando debido a que
+	pthread_mutex_unlock(&mutex); //desbloqueamos el mutex para que otro hilo pueda usarlo
 
 }
 
+//simula el tiempo que esta en la discoteca el cliente
 void dance(int id, int isvip)
 {
 	printf("Client %2d (%s) dancing in disco\n", id, VIPSTR(isvip));
 	sleep((rand() % 3) + 1);
 }
 
+//es la funcion que hace el hilo al salir de la discoteca el cliente
 void disco_exit(int id, int isvip)
 {
-	pthread_mutex_lock (&mutex);
-	num_clients_inside--;
-	/*
-	Si el numero de vips es mayor que cero hace el signal a los vips, si no si
-	el numero de normal es mayor que cero se lo hace a los normal
-	*/
-	
-	if(num_vips_cola > 0) {
-		signal (cond_vip);
-	} else if(num_normales_cola > 0) {
-		signal (cond_normal);
-	}
-	pthread_mutex_unlock(&mutex);
-}
+	pthread_mutex_lock(&mutex); //bloqueamos el mutex porque vamos a hacer modificaciones 
 
+	ocupacion--; //como ha salido de la discoteca decrementamos el numero de clientes dentro de la discoteca
+
+	pthread_cond_broadcast(&cond); //desbloqueamos el mutex para que otro pueda cogerlo
+
+	pthread_mutex_unlock(&mutex); //hacemos un broadcast para despertar a todos y que al que le toque que entre
+
+}
+//funcion de entrada de los clientes
 void *client(void *arg)
 {
-	struct arguentos_cliente *c = (struct arguentos_cliente*) arg;
+	tCliente *cliente = (tCliente*) arg; //debemos hacer un casteo para poder operar con  los datos de los cliente
+	
+	if(cliente->isvip) { //si es vip, llamamos al enter_vip 
+		enter_vip_client(cliente->id);
+	} else  { //si no, es un cliente normal
+		enter_normal_client(cliente->id);
+	}
 
-	if(c->isVip) { //si el cliente es vip, llamamos a enter_vip_client
-		enter_vip_client(c->id); //metemos el cliente vip
-	} else { //llamamos a cliente normal
-		enter_normal_client (c->id); //metemos el cliente normal
-	}	
-	disco_exit (c->id, c->isVip);
-	pthread_exit(NULL);
+	dance(cliente->id, cliente->isvip); //una vez esta dentro, se pone a bailar
+	disco_exit (cliente->id, cliente->isvip); //una vez ha bailado debe salir de la discoteca
+
+	//ver si el free del hilo que creamos hay que hacerlo aqui o donde hacemos el malloc
+
+
 }
 
 int main(int argc, char *argv[])
 {
-	FILE *f = fopen (argv[1], 'r'); //revisar el parametro de lectura o escritura
-	if (f == NULL) { //si el fichero es NULL significara que ha fallado el fopen
-		perror ("fopen"); //indicamos que el error ha sido por el fopen
-		exit (EXIT_FAILURE); //hacemos un exit para cortar
-	}
-		int n;
-		fscanf(f, "%d", &n); 
-		pthread_attr_t attr;
-		pthread_t phs[n];
-		
-		//inicializar (falta mirar si tengo ya las dos salas de espera)
-		pthread_mutex_init(&mutex,  NULL);
-		pthread_cond_init(&num_clients_inside,NULL);
+	/*
+	Leer los datos del archivo:
 
-		pthread_attr_init(&attr);
-		pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    El número total de clientes.
 
-		for (int i = 0; i < n; i++){
+    La lista de si cada uno es VIP (1) o no (0).
 
-			struct arguentos_cliente* ptrp=malloc(sizeof(struct arguentos_cliente));
-			
-			fscanf(f, "%d", &ptrp->isVip);
-			ptrp->id= i;
-			pthread_create(&phs[i], &attr, client, ptrp);
-		}
+Reservar memoria para cada cliente (crear un array de estructuras o mallocs individuales).
 
-		for (int i = 0; i < n; i++){
-			pthread_join(phs[i], NULL);
-		}
-		
-		//destruir
-		pthread_mutex_destroy(&mutex);
- 		pthread_cond_destroy(&num_clients_inside);
+Crear un hilo por cliente:
+
+    Cada hilo debe ejecutar la función client(...).
+
+    A cada hilo se le pasa su id y si es vip.
+
+Esperar a que todos los hilos terminen:
+
+    Usar pthread_join para cada hilo.
+
+Liberar recursos:
+
+    Destruir los mutex y cond.
+
+    Liberar memoria si hiciste malloc.
+	*/
 	
 	return 0;
 }
