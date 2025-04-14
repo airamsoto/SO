@@ -27,7 +27,7 @@ id: que corresponde con el orden creacion del hilo
 isvip: valor que indique si es vip o no
 */
 
-#define CAPACITY 5
+#define CAPACITY 1
 #define VIPSTR(vip) ((vip) ? "  vip  " : "not vip")
 
 typedef struct {
@@ -38,7 +38,6 @@ typedef struct {
 
 int ocupacion = 0; //debemos llevar un registro de los clientes dentro de la discoteca, se incrementara cuando entren y decrementara cuando salga
 int esperando_vip = 0; //numero de personas vips esperando, se incremente justo antes de que el vip este con el wait
-int esperando_normal = 0; //numero de personas noramles esperando, se incrementa justo antes de que el normal este con el wait
 
 /*
 sirve para proteger las variables compartidas para que dos hilos no modifiquen la misma variable (ocupacion, esperando...)
@@ -58,10 +57,11 @@ void enter_normal_client(int id)
 {
 	//a priori deberia ser igual que el vip pero en la condicion añadiendo que no pueden haber vips esperando
 	pthread_mutex_lock(&mutex); //bloqueamos el mutex ya que vamos a hacer modificaciones
-
+	
 	while (ocupacion >= CAPACITY || esperando_vip > 0) { //en este caso tenemos las condiciones de que haya hueco y de que no hayan vips esperando
 		pthread_cond_wait (&cond, &mutex);//dormimos al  hilo hasta que se cumplan las dos condiciones
 	}
+
 	ocupacion++; //un cliente mas en la discoteca
 	pthread_mutex_unlock(&mutex); //desbloqueamos el mutex para que puedan usarlo los demas hilos
 }
@@ -151,6 +151,59 @@ Liberar recursos:
 
     Liberar memoria si hiciste malloc.
 	*/
+
+
+	//abrimos el fichero para poder leer los datos de entrada
+	FILE *file = fopen (argv[1], "r"); //primer agumento es el nombre del fichero y el segundo indica que solo queremos leer
+	if(file == NULL) {
+		perror ("fopen");
+		exit(EXIT_FAILURE);
+	}
+	
+	//ahora para leer el contenido debemos usar fscan
+	int numero_clientes;
+	fscanf (file, "%d", &numero_clientes); //la de indica que vamos a leer un  entero y &numero_clientes, la direccion donde lo guardaremos
+	
+
+	tCliente *clientes = malloc(sizeof(tCliente) * numero_clientes);
+	pthread_t *hilos = malloc(sizeof(pthread_t) * numero_clientes);
+
+
+	for (int i = 0; i < numero_clientes; i++) {
+		int is_vip;
+		fscanf(file, "%d", &is_vip);  // Lee el 0 o 1
+	
+		clientes[i].id = i;             // Asigna su número
+		clientes[i].isvip = is_vip;     // Guarda si es vip
+	}
+
+	/*
+	para crear los hilos haremos uso de la funcion pthread_create donde el primer argumento es la estructura de hilos
+	luego los atributos, que en nuestro caso seran NULL, y la funcion a llamar por cada vez que se cree un hilo
+	en nuestro caso es client con un argumento que es el array del clinte en cada posicion i.
+	*/
+	for (int i = 0; i < numero_clientes; i++) {
+		pthread_create(&hilos[i], NULL, client, (void*) &clientes[i]);
+	}
+	
+	for (int i = 0; i < numero_clientes; i++) {
+		pthread_join(hilos[i], NULL); //lo hacemos para evitar que el programa acabe antes de que todos los hilos hayan acabado
+	}
+
+	//liberamos la memoria reservada con malloc
+	free(clientes);
+	free(hilos);
+
+
+	pthread_mutex_destroy(&mutex); //destruimos mutex
+	pthread_cond_destroy(&cond); //destruimos cond
+
+	
+
+
+	
+
+	
 	
 	return 0;
 }
